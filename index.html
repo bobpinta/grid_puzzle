@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>2D Grid Realtime Multiplayer Proof of Concept</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom game board animations & crisp pixel rendering */
+    .grid-tile {
+      transition: background-color 0.15s ease;
+    }
+    .player-token {
+      transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    /* Touch controls styling */
+    .d-pad-btn {
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* Custom scrollbar for activity feed */
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #1f2937;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col justify-between select-none">
+
+  <header class="bg-slate-900 border-b border-slate-800 p-4 shadow-lg sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+          <i class="fa-solid fa-cubes-stacked text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-wide text-white">GridPuzzle <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-normal border border-indigo-500/30">PoC v1.0</span></h1>
+          <p class="text-xs text-slate-400">Real-time Multi-Client Grid Sync</p>
+        </div>
+      </div>
+
+      <!-- Sync & Role Badges -->
+      <div class="flex items-center space-x-3">
+        <div id="connectionStatusBadge" class="flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-2"></span>
+          <span id="connectionStatusText">Connected (Firestore)</span>
+        </div>
+        <div id="activeRoleBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+          Role: <span id="currentRoleText" class="text-indigo-400">Not Selected</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl w-full mx-auto p-4 flex-1 flex flex-col gap-6">
+
+    <!-- Role Selection / Join Bar -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- Player 1 Slot -->
+      <div id="p1Card" class="bg-slate-900/80 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between transition-all">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-lg">
+            P1
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Player 1</h3>
+            <p id="p1Status" class="text-xs text-slate-400">Empty Slot</p>
+          </div>
+        </div>
+        <button id="claimP1Btn" onclick="claimRole('p1')" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl transition shadow-lg shadow-blue-900/30 disabled:opacity-40 disabled:cursor-not-allowed">
+          Join P1
+        </button>
+      </div>
+
+      <!-- Player 2 Slot -->
+      <div id="p2Card" class="bg-slate-900/80 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between transition-all">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-400 font-bold text-lg">
+            P2
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Player 2</h3>
+            <p id="p2Status" class="text-xs text-slate-400">Empty Slot</p>
+          </div>
+        </div>
+        <button id="claimP2Btn" onclick="claimRole('p2')" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs rounded-xl transition shadow-lg shadow-rose-900/30 disabled:opacity-40 disabled:cursor-not-allowed">
+          Join P2
+        </button>
+      </div>
+
+      <!-- Spectator / Reset Option -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+            <i class="fa-solid fa-eye"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Spectator</h3>
+            <p id="spectatorCount" class="text-xs text-slate-400">Watch gameplay live</p>
+          </div>
+        </div>
+        <button onclick="claimRole('spectator')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs rounded-xl border border-slate-700 transition">
+          Spectate
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Playground Workspace -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      
+      <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 shadow-xl flex flex-col items-center">
+        <!-- Board Info Bar -->
+        <div class="w-full flex items-center justify-between mb-4 px-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">10x10 Map Grid</span>
+          <div class="flex items-center space-x-3">
+            <button onclick="resetBoardState()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center space-x-1">
+              <i class="fa-solid fa-rotate-right text-xs"></i>
+              <span>Reset Positions</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- The 2D Grid Canvas Wrapper -->
+        <div class="relative w-full aspect-square max-w-[500px] bg-slate-950 rounded-xl border-2 border-slate-800 p-2 overflow-hidden shadow-inner flex items-center justify-center">
+          <div id="gridBoard" class="grid grid-cols-10 grid-rows-10 gap-1 w-full h-full">
+            <!-- Tiles rendered dynamically by JS -->
+          </div>
+        </div>
+
+        <!-- Controls Helper Info -->
+        <div class="mt-4 text-center text-xs text-slate-400 flex items-center justify-center space-x-4">
+          <span><kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">WASD</kbd> or <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-300 font-mono">Arrow Keys</kbd> to move</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-4">
+        
+        <!-- On-Screen Touch D-Pad for Mobile testing -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col items-center">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">On-Screen Controls</h2>
+          
+          <div class="grid grid-cols-3 gap-2 w-48 h-48">
+            <div></div>
+            <button onclick="handleMove('UP')" class="d-pad-btn bg-slate-800 active:bg-indigo-600 text-slate-200 hover:bg-slate-700 border border-slate-700 rounded-2xl flex items-center justify-center text-xl shadow-md transition-all active:scale-95">
+              <i class="fa-solid fa-arrow-up"></i>
+            </button>
+            <div></div>
+
+            <button onclick="handleMove('LEFT')" class="d-pad-btn bg-slate-800 active:bg-indigo-600 text-slate-200 hover:bg-slate-700 border border-slate-700 rounded-2xl flex items-center justify-center text-xl shadow-md transition-all active:scale-95">
+              <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <div class="bg-slate-950/50 rounded-xl border border-slate-800/80 flex items-center justify-center text-slate-600">
+              <i class="fa-solid fa-gamepad"></i>
+            </div>
+            <button onclick="handleMove('RIGHT')" class="d-pad-btn bg-slate-800 active:bg-indigo-600 text-slate-200 hover:bg-slate-700 border border-slate-700 rounded-2xl flex items-center justify-center text-xl shadow-md transition-all active:scale-95">
+              <i class="fa-solid fa-arrow-right"></i>
+            </button>
+
+            <div></div>
+            <button onclick="handleMove('DOWN')" class="d-pad-btn bg-slate-800 active:bg-indigo-600 text-slate-200 hover:bg-slate-700 border border-slate-700 rounded-2xl flex items-center justify-center text-xl shadow-md transition-all active:scale-95">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div></div>
+          </div>
+        </div>
+
+        <!-- Activity Log & Live Feed -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col h-64">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Realtime Activity Feed</h2>
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          </div>
+          <div id="eventLog" class="flex-1 overflow-y-auto space-y-2 pr-1 custom-scroll text-xs">
+            <div class="text-slate-500 italic">Connecting to game room...</div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <div id="nicknameModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl">
+      <div class="text-center mb-6">
+        <div class="w-14 h-14 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3">
+          <i class="fa-solid fa-user-gear"></i>
+        </div>
+        <h2 class="text-xl font-bold text-white">Enter Multiplayer Room</h2>
+        <p class="text-xs text-slate-400 mt-1">Pick your nickname to identify yourself on the board</p>
+      </div>
+
+      <form onsubmit="saveNickname(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Your Name / Nickname</label>
+          <input type="text" id="nicknameInput" maxlength="12" placeholder="e.g. Hero, DungeonMaster" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 transition">
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-xl text-sm transition shadow-lg shadow-indigo-900/40">
+          Enter Game Room
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-slate-900/50 border-t border-slate-800/80 py-3 text-center text-xs text-slate-500">
+    Grid Game Engine Proof of Concept • 10x10 Matrix • Firestore Realtime Sync Enabled
+  </footer>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const GRID_SIZE = 10;
+    
+    // Map Layout Matrix: 0 = Floor, 1 = Wall
+    const MAP_LAYOUT = [
+      [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+      [0, 1, 1, 0, 1, 0, 1, 1, 1, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+      [0, 1, 1, 1, 0, 1, 1, 0, 0, 0],
+      [0, 0, 0, 1, 0, 0, 1, 0, 1, 0],
+      [0, 1, 0, 1, 0, 0, 1, 0, 1, 0],
+      [0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+      [0, 1, 1, 0, 0, 0, 0, 0, 1, 0],
+      [0, 1, 1, 1, 0, 1, 1, 1, 1, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    ];
+
+    let myPlayerId = null; // 'p1', 'p2', or 'spectator'
+    let myNickname = "Player";
+    let userId = null;
+    let db = null;
+    let auth = null;
+    let roomDocRef = null;
+
+    // Default Initial Game State
+    let gameState = {
+      p1: { x: 0, y: 0, name: "Player 1", active: false, uid: null },
+      p2: { x: 9, y: 9, name: "Player 2", active: false, uid: null },
+      logs: [{ text: "Room initialized. Waiting for players...", time: new Date().toLocaleTimeString() }]
+    };
+
+    // Global App ID resolution
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'grid-poc-default';
+
+    // Broadcast Channel Fallback for instant cross-tab testing if offline
+    const localBroadcast = new BroadcastChannel("grid_poc_sync");
+
+    async function initFirebase() {
+      try {
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+          ? JSON.parse(__firebase_config) 
+          : { apiKey: "demo", authDomain: "demo", projectId: "demo" };
+
+        const app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+
+        // Rule 3: Auth First
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+
+        userId = auth.currentUser?.uid || crypto.randomUUID();
+        
+        // Rule 1: Public Collection Path
+        roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'gameRoom', 'mainState');
+
+        // Subscribe to Realtime Updates
+        subscribeToRoomUpdates();
+
+      } catch (err) {
+        console.warn("Firebase initialized in fallback mode or error:", err);
+        updateConnectionBadge(false, "Local Fallback Mode");
+      }
+    }
+
+    function subscribeToRoomUpdates() {
+      if (!roomDocRef) return;
+
+      onSnapshot(roomDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          gameState = docSnap.data();
+          renderApp();
+        } else {
+          // Initialize state if first time
+          setDoc(roomDocRef, gameState);
+        }
+        updateConnectionBadge(true, "Connected (Firestore)");
+      }, (error) => {
+        console.error("Firestore Listen Error:", error);
+        updateConnectionBadge(false, "Local Sync Mode");
+      });
+    }
+
+    // Local Broadcast Receiver for cross-tab fallback
+    localBroadcast.onmessage = (event) => {
+      if (event.data) {
+        gameState = event.data;
+        renderApp();
+      }
+    };
+
+    async function syncStateToDB() {
+      // Local sync broadcast
+      localBroadcast.postMessage(gameState);
+
+      if (roomDocRef && auth.currentUser) {
+        try {
+          await setDoc(roomDocRef, gameState, { merge: true });
+        } catch (err) {
+          console.error("Sync error:", err);
+        }
+      }
+      renderApp();
+    }
+
+    window.handleMove = function(direction) {
+      if (!myPlayerId || myPlayerId === 'spectator') return;
+
+      const player = gameState[myPlayerId];
+      if (!player) return;
+
+      let targetX = player.x;
+      let targetY = player.y;
+
+      if (direction === 'UP') targetY -= 1;
+      if (direction === 'DOWN') targetY += 1;
+      if (direction === 'LEFT') targetX -= 1;
+      if (direction === 'RIGHT') targetX += 1;
+
+      // 1. Boundary Check
+      if (targetX < 0 || targetX >= GRID_SIZE || targetY < 0 || targetY >= GRID_SIZE) return;
+
+      // 2. Wall Collision Check
+      if (MAP_LAYOUT[targetY][targetX] === 1) return;
+
+      // 3. Other Player Collision Check
+      const otherRole = myPlayerId === 'p1' ? 'p2' : 'p1';
+      const otherPlayer = gameState[otherRole];
+
+      if (otherPlayer && otherPlayer.active && otherPlayer.x === targetX && otherPlayer.y === targetY) {
+        addLog(`${player.name} tried to bump into ${otherPlayer.name}!`);
+        syncStateToDB();
+        return;
+      }
+
+      // Valid move! Update player position
+      player.x = targetX;
+      player.y = targetY;
+
+      addLog(`${player.name} moved ${direction}`);
+      syncStateToDB();
+    };
+
+    // Keyboard Event Listener
+    window.addEventListener('keydown', (e) => {
+      if (document.activeElement.tagName === 'INPUT') return;
+
+      switch(e.key) {
+        case 'ArrowUp': case 'w': case 'W': handleMove('UP'); break;
+        case 'ArrowDown': case 's': case 'S': handleMove('DOWN'); break;
+        case 'ArrowLeft': case 'a': case 'A': handleMove('LEFT'); break;
+        case 'ArrowRight': case 'd': case 'D': handleMove('RIGHT'); break;
+      }
+    });
+
+    window.saveNickname = function(e) {
+      e.preventDefault();
+      const input = document.getElementById('nicknameInput').value.trim();
+      if (input) {
+        myNickname = input;
+        document.getElementById('nicknameModal').classList.add('hidden');
+        addLog(`${myNickname} joined the room.`);
+        syncStateToDB();
+      }
+    };
+
+    window.claimRole = function(role) {
+      if (role === 'spectator') {
+        if (myPlayerId && gameState[myPlayerId]) {
+          gameState[myPlayerId].active = false;
+          gameState[myPlayerId].uid = null;
+        }
+        myPlayerId = 'spectator';
+        document.getElementById('currentRoleText').textContent = "Spectator";
+        document.getElementById('currentRoleText').className = "text-amber-400";
+        addLog(`${myNickname} is now spectating.`);
+        syncStateToDB();
+        return;
+      }
+
+      // Check if slot available or already claimed by me
+      if (gameState[role].active && gameState[role].uid !== userId) {
+        alert("This slot is already taken by another player!");
+        return;
+      }
+
+      // Release existing slot if changing roles
+      if (myPlayerId && myPlayerId !== 'spectator' && myPlayerId !== role) {
+        gameState[myPlayerId].active = false;
+        gameState[myPlayerId].uid = null;
+      }
+
+      myPlayerId = role;
+      gameState[role].active = true;
+      gameState[role].uid = userId;
+      gameState[role].name = myNickname;
+
+      const roleColor = role === 'p1' ? 'text-blue-400' : 'text-rose-400';
+      document.getElementById('currentRoleText').textContent = role === 'p1' ? 'Player 1' : 'Player 2';
+      document.getElementById('currentRoleText').className = roleColor;
+
+      addLog(`${myNickname} claimed ${role === 'p1' ? 'Player 1' : 'Player 2'}`);
+      syncStateToDB();
+    };
+
+    window.resetBoardState = function() {
+      gameState.p1.x = 0;
+      gameState.p1.y = 0;
+      gameState.p2.x = 9;
+      gameState.p2.y = 9;
+      addLog("Board positions reset to starting points.");
+      syncStateToDB();
+    };
+
+    function addLog(message) {
+      if (!gameState.logs) gameState.logs = [];
+      gameState.logs.unshift({
+        text: message,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+      // Keep last 30 logs
+      if (gameState.logs.length > 30) gameState.logs.pop();
+    }
+
+    function updateConnectionBadge(isConnected, text) {
+      const badge = document.getElementById('connectionStatusBadge');
+      const label = document.getElementById('connectionStatusText');
+      label.textContent = text;
+      
+      if (isConnected) {
+        badge.className = "flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30";
+      } else {
+        badge.className = "flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30";
+      }
+    }
+
+    function renderApp() {
+      renderGrid();
+      renderLobbyStatus();
+      renderLogs();
+    }
+
+    function renderGrid() {
+      const boardContainer = document.getElementById('gridBoard');
+      boardContainer.innerHTML = '';
+
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          const tile = document.createElement('div');
+          const isWall = MAP_LAYOUT[y][x] === 1;
+
+          tile.className = `relative rounded-md flex items-center justify-center font-bold text-xs ${
+            isWall 
+              ? 'bg-slate-800 border border-slate-700/80 shadow-inner' 
+              : 'bg-slate-900/60 border border-slate-800/40 hover:bg-slate-800/30'
+          }`;
+
+          // Draw Wall Pattern/Icon
+          if (isWall) {
+            tile.innerHTML = `<i class="fa-solid fa-block-brick text-slate-700 text-xs opacity-50"></i>`;
+          }
+
+          // Check if Player 1 is on this tile
+          if (gameState.p1.active && gameState.p1.x === x && gameState.p1.y === y) {
+            const p1Token = createPlayerToken('P1', gameState.p1.name, 'bg-blue-600', 'border-blue-400', 'shadow-blue-500/50');
+            tile.appendChild(p1Token);
+          }
+
+          // Check if Player 2 is on this tile
+          if (gameState.p2.active && gameState.p2.x === x && gameState.p2.y === y) {
+            const p2Token = createPlayerToken('P2', gameState.p2.name, 'bg-rose-600', 'border-rose-400', 'shadow-rose-500/50');
+            tile.appendChild(p2Token);
+          }
+
+          boardContainer.appendChild(tile);
+        }
+      }
+    }
+
+    function createPlayerToken(label, name, bgClass, borderClass, shadowClass) {
+      const token = document.createElement('div');
+      token.className = `player-token absolute inset-1 ${bgClass} border-2 ${borderClass} rounded-xl flex flex-col items-center justify-center text-white font-black shadow-lg ${shadowClass} z-10`;
+      
+      token.innerHTML = `
+        <span class="text-xs leading-none">${label}</span>
+        <span class="absolute -top-5 bg-slate-900/90 text-slate-200 border border-slate-700 text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap shadow font-normal">
+          ${name}
+        </span>
+      `;
+      return token;
+    }
+
+    function renderLobbyStatus() {
+      // P1 Status
+      const p1Status = document.getElementById('p1Status');
+      const claimP1Btn = document.getElementById('claimP1Btn');
+      const p1Card = document.getElementById('p1Card');
+
+      if (gameState.p1.active) {
+        p1Status.innerHTML = `<span class="text-blue-400 font-medium">${gameState.p1.name}</span> (${gameState.p1.uid === userId ? 'You' : 'Connected'})`;
+        p1Card.className = "bg-blue-950/20 border-2 border-blue-500/40 rounded-2xl p-4 flex items-center justify-between";
+        claimP1Btn.disabled = gameState.p1.uid !== userId;
+        claimP1Btn.textContent = gameState.p1.uid === userId ? 'Joined' : 'Occupied';
+      } else {
+        p1Status.textContent = "Empty Slot";
+        p1Card.className = "bg-slate-900/80 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between";
+        claimP1Btn.disabled = false;
+        claimP1Btn.textContent = "Join P1";
+      }
+
+      // P2 Status
+      const p2Status = document.getElementById('p2Status');
+      const claimP2Btn = document.getElementById('claimP2Btn');
+      const p2Card = document.getElementById('p2Card');
+
+      if (gameState.p2.active) {
+        p2Status.innerHTML = `<span class="text-rose-400 font-medium">${gameState.p2.name}</span> (${gameState.p2.uid === userId ? 'You' : 'Connected'})`;
+        p2Card.className = "bg-rose-950/20 border-2 border-rose-500/40 rounded-2xl p-4 flex items-center justify-between";
+        claimP2Btn.disabled = gameState.p2.uid !== userId;
+        claimP2Btn.textContent = gameState.p2.uid === userId ? 'Joined' : 'Occupied';
+      } else {
+        p2Status.textContent = "Empty Slot";
+        p2Card.className = "bg-slate-900/80 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between";
+        claimP2Btn.disabled = false;
+        claimP2Btn.textContent = "Join P2";
+      }
+    }
+
+    function renderLogs() {
+      const feed = document.getElementById('eventLog');
+      if (!gameState.logs || gameState.logs.length === 0) return;
+
+      feed.innerHTML = gameState.logs.map(log => `
+        <div class="flex items-start justify-between bg-slate-950/40 p-2 rounded border border-slate-800/50">
+          <span class="text-slate-300">${log.text}</span>
+          <span class="text-[10px] text-slate-500 font-mono ml-2">${log.time}</span>
+        </div>
+      `).join('');
+    }
+
+    // Initialize App on Window Load
+    window.addEventListener('load', () => {
+      initFirebase();
+      renderApp();
+    });
+  </script>
+</body>
+</html>
