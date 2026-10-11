@@ -260,9 +260,15 @@
 
     async function initFirebase() {
       try {
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-          ? JSON.parse(__firebase_config) 
-          : { apiKey: "demo", authDomain: "demo", projectId: "demo" };
+        const firebaseConfig = {
+                                apiKey: "AIzaSyBca3LyhEb8uFU7NxFcFmUINzw1eHQosU",
+                                authDomain: "gridpuzzle-6169d.firebaseapp.com",
+                                projectId: "gridpuzzle-6169d",
+                                storageBucket: "gridpuzzle-6169d.firebasestorage.app",
+                                messagingSenderId: "354673561473",
+                                appId: "1:354673561473:web:97b01dd43b7c55d5492280",
+                                measurementId: "G-J084QYP9GD"
+                              };
 
         const app = initializeApp(firebaseConfig);
         auth = getAuth(app);
